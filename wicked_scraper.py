@@ -16,12 +16,23 @@ from scrapy.utils.log import configure_logging
 from bs4 import BeautifulSoup
 
 
+####################################################################
 
-#########################################################################################
-############						DATABASE STUFF						############
-#########################################################################################
+workdir = "Responsiveness/protests/workdir" #CHANGED 
+datadir = "Responsiveness/protests/wickedonna" #CHANGED
+target_db = "Wickedonna_html.db"
+target_db = os.path.join (os.environ ['HOME'], datadir, target_db)
 
-###################    			 NEW DATABASE	 		   ###########################
+wicked_big = "Wickedonna.db" #%str (date.today())
+wicked_big = os.path.join (os.environ ['HOME'], datadir, wicked_big)
+
+cities = "Cities.csv"
+cities = os.path.join (os.environ ['HOME'], workdir, cities)
+counties = "Counties.csv"
+counties = os.path.join (os.environ ['HOME'], workdir, counties)
+
+
+####################################################################
 
 def new_database (name):
 	conn = sqlite3.connect (name)
@@ -42,8 +53,6 @@ def new_database (name):
 	print("after execute")
 	conn.close
 
-###################    			 MERGE DATABASES 		   ###########################
-
 
 def finddate (row):
 	date = re.search (r'201\d{1}(\.|\s|年)+\d{1,2}(\.|\s|月)*\d{1,2}', row).group(0)
@@ -58,7 +67,7 @@ def finddate (row):
 	except Exception:
 		return date
 	
-	
+
 def get_place (infile):
 	with open(infile, "rU") as file:
 		entries = ""
@@ -168,9 +177,6 @@ def extract_people (content):
 
 	return term
 
-##########################################################################################
-#####							THE SCRAPY SCRAPER							##########
-##########################################################################################	
 
 
 class Wicked_Spider(scrapy.Spider):
@@ -201,15 +207,9 @@ class Wicked_Spider(scrapy.Spider):
 			conn.commit()
 		except Exception as e:
 			print (e)
-			if "Service" not in content [4] and "Hotspot" not in content [4] and content [5] != None and "None" not in content [5]:
-				conn.execute ("UPDATE Cases SET date = ? where url == ?;",(content [1], url))
-				conn.execute ("UPDATE Cases SET city = ? where url == ?;",(content [2], url))
-				conn.execute ("UPDATE Cases SET county = ? where url == ?;",(content [3], url))
-				conn.execute ("UPDATE Cases SET headline = ? where url == ?;",(content [4], url))
-				conn.execute ("UPDATE Cases SET text = ? where url == ?;",(content [5], url))
-				conn.execute ("UPDATE Cases SET keyword1 = ? where url == ?;",(content [6], url))
-				conn.execute ("UPDATE Cases SET keyword2 = ? where url == ?;",(content [7], url))
-				conn.execute ("UPDATE Cases SET people = ? where url == ?;",(content [8], url))
+			if "Service" not in content [4] and "Hotspot" not in content[4] and content[5] is not None and "None" not in content [5]:
+				conn.execute ("UPDATE Cases SET date = ?, city = ?, county = ?, headline = ?, text = ?, keyword1 = ?, keyword2 = ?, people = ? WHERE url == ?;",(content[1], content[2], content[3], content[4], content[5], content[6], content[7], content[8], url))
+
 					#print (content [0], "UPDATED")
 			else:
 				print (content [0], "no update because of", e)
@@ -240,24 +240,7 @@ def get_inurls (wickedlinks, wickedbig):
 	#print ("we still have", len (inurls), "elements to scrape")	
 	return inurls
 
-			
-##########################################################################################
-###########						SPEFCIFICATIONS							##########
-##########################################################################################
-	
-workdir = "Responsiveness/protests/workdir" #CHANGED 
-datadir = "Responsiveness/protests/wickedonna" #CHANGED
-target_db = "Wickedonna_html.db"
-target_db = os.path.join (os.environ ['HOME'], datadir, target_db)
-
-wicked_big = "Wickedonna.db" #%str (date.today())
-wicked_big = os.path.join (os.environ ['HOME'], datadir, wicked_big)
-
-cities = "Cities.csv"
-cities = os.path.join (os.environ ['HOME'], workdir, cities)
-counties = "Counties.csv"
-counties = os.path.join (os.environ ['HOME'], workdir, counties)
-
+		
 
 if __name__ == "__main__":
 	
