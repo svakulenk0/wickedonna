@@ -18,14 +18,14 @@ from bs4 import BeautifulSoup
 
 
 #########################################################################################
-############						DATABASE STUFF							############
+############						DATABASE STUFF						############
 #########################################################################################
 
 ###################    			 NEW DATABASE	 		   ###########################
 
 def new_database (name):
 	conn = sqlite3.connect (name)
-	print("connected %s"%name)
+	#print("connected %s"%name)
 	cur = conn.cursor()
 	cur.execute("""CREATE TABLE CASES
     	   (ID integer primary key autoincrement,
@@ -33,7 +33,7 @@ def new_database (name):
      	  	date    		TEXT    NOT NULL,
      	  	city    		TEXT    NOT NULL,
      	  	county			TEXT	NOT NULL,
-       		headline    	TEXT    NOT NULL,
+       		headline		TEXT    NOT NULL,
        		text   			TEXT    NOT NULL,
        		keyword1 		TEXT	NOT NULL,
        		keyword2		Text	NOT NULL,
@@ -79,7 +79,10 @@ def get_place (infile):
 def extract_content (soup,url):
 	title = headline = content = date = keyword1 = keyword2 = city_w = county_w = "none"
 	title = soup.find ('title')
-	headline = re.sub('<[^<]+?>', '', str (title))
+	headline = re.sub('<[^<]+?>', '', str (title))	
+	
+	#TODO: content	
+	
 	#print ("headline", headline)
 	#content = soup.find ('div', {'class': 'article-content entry-content'})
 	content = soup.find ('div', {'class': 'article-content entry-content'})
@@ -166,7 +169,7 @@ def extract_people (content):
 	return term
 
 ##########################################################################################
-#####							THE SCRAPY SCRAPER								##########
+#####							THE SCRAPY SCRAPER							##########
 ##########################################################################################	
 
 
@@ -175,19 +178,18 @@ class Wicked_Spider(scrapy.Spider):
 
 	def start_requests (self):
 		urls = inurls
-		for i in range (0, len(inurls)):
-
-			url = urls[i]
-			for url in urls:
-				yield scrapy.Request(url=url, callback=self.parse)
+		#for i in range (0, 5):
+		for url in urls:
+			yield scrapy.Request(url=url, callback=self.parse)
 
 	def parse (self, response):
+		url = response.url		
 		#print("IN PARSE NOW")
 		conn = sqlite3.connect (target_db)
 		pageSource = response.body
 		soup = BeautifulSoup(pageSource, "lxml")
 		try:
-			content = extract_content (soup, response.url)
+			content = extract_content (soup, url)
 		except Exception as e:
 			print (e)
 			
@@ -235,12 +237,12 @@ def get_inurls (wickedlinks, wickedbig):
 
 	inurls = list(set(urls) - set(matchlist))
 
-	print ("we still have", len (inurls), "elements to scrape")	
+	#print ("we still have", len (inurls), "elements to scrape")	
 	return inurls
 
 			
 ##########################################################################################
-###########						SPEFCIFICATIONS								##########
+###########						SPEFCIFICATIONS							##########
 ##########################################################################################
 	
 workdir = "Responsiveness/protests/workdir" #CHANGED 
@@ -255,8 +257,6 @@ cities = "Cities.csv"
 cities = os.path.join (os.environ ['HOME'], workdir, cities)
 counties = "Counties.csv"
 counties = os.path.join (os.environ ['HOME'], workdir, counties)
-	
-interval = 0
 
 
 if __name__ == "__main__":
@@ -271,7 +271,6 @@ if __name__ == "__main__":
 	countylist = set (get_place (counties))
 
 	inurls = get_inurls (wicked_big, target_db)
-	interval = int(len (inurls)/75)
 
 	process = CrawlerProcess({
     'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)'
