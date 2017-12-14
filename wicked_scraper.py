@@ -18,8 +18,8 @@ from bs4 import BeautifulSoup
 
 ####################################################################
 
-workdir = "Responsiveness/protests/workdir" #CHANGED 
-datadir = "Responsiveness/protests/wickedonna" #CHANGED
+workdir = "Responsiveness/protests/workdir" #SPECIFY 
+datadir = "Responsiveness/protests/wickedonna" #SPECIFY
 target_db = "Wickedonna_html.db"
 target_db = os.path.join (os.environ ['HOME'], datadir, target_db)
 
@@ -200,6 +200,7 @@ class Wicked_Spider(scrapy.Spider):
 			print (e)
 			
 		try:
+			#TODO: insert or update? 
 			conn.execute("INSERT INTO Cases (url, date, city, county, headline, text, keyword1, \
 				keyword2, people) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", \
 				(content[0], content [1], content [2], content [3], content [4], soup.prettify(),\
@@ -209,12 +210,9 @@ class Wicked_Spider(scrapy.Spider):
 			print (e)
 			if "Service" not in content [4] and "Hotspot" not in content[4] and content[5] is not None and "None" not in content [5]:
 				conn.execute ("UPDATE Cases SET date = ?, city = ?, county = ?, headline = ?, text = ?, keyword1 = ?, keyword2 = ?, people = ? WHERE url == ?;",(content[1], content[2], content[3], content[4], content[5], content[6], content[7], content[8], url))
-
-					#print (content [0], "UPDATED")
 			else:
 				print (content [0], "no update because of", e)
-				pass
-		
+				pass		
 			conn.commit()
 		print ("database committed", content [0])
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+cd #!/usr/bin/python
 # -*- coding: utf8 -*-
 
 
@@ -22,7 +22,6 @@ import multiprocessing as mp
 import logging
 from time import sleep
 import jieba
-import csv
 from collections import Counter
 from pycnnum import cn2num
 import random
@@ -39,7 +38,9 @@ logging.basicConfig(format='%(asctime) s : %(levelname)s : %(message)s', level=l
 
 def new_database (name):
 	conn = sqlite3.connect (name)
-	conn.execute('''CREATE TABLE CASES
+	print("connected %s"%name)
+	cur = conn.cursor()
+	cur.execute("""CREATE TABLE CASES
     	   (ID integer primary key autoincrement,
     	   	url    			TEXT    NOT NULL,
      	  	date    		TEXT    NOT NULL,
@@ -47,10 +48,11 @@ def new_database (name):
      	  	county			TEXT	NOT NULL,
        		headline    	TEXT    NOT NULL,
        		text   			TEXT    NOT NULL,
-       		keyword1 		TEXT		NOT NULL,
-       		keyword2		Text		NOT NULL,
-       		people			Text		NOT NULL,
-       		UNIQUE (url));''')
+       		keyword1 		TEXT	NOT NULL,
+       		keyword2		Text	NOT NULL,
+       		people			Text	NOT NULL,
+       		UNIQUE (url));""")
+	print("after execute")
 	conn.close
 
 
@@ -190,15 +192,17 @@ def linkscraper (rangemin, rangemax, inurls):
 	
 	#webdriver.PhantomJS(service_args=['--load-images=no'])
 	#driver =  webdriver.PhantomJS('phantomjs')
-
-	driver =  webdriver.Chrome()
+	print("BEFORE OPENING DRIVER")
+	driver =  webdriver.Chrome('/usr/bin/google-chrome') #CHANGED added path to chromedriver
 	
+	print("RANGE ", rangemin, " ", rangemax)
 	
 	for i in range (rangemin, rangemax):
 		url = inurls [i]
 		driver.get(url)
-		time.sleep(10)
+		time.sleep(1000)
 		soup = BeautifulSoup(driver.page_source, "lxml")
+		print("BEFORE SOUP")
 		print (soup.prettify())
 
 		try:
@@ -269,11 +273,11 @@ def apply_async_with_callback (inurls):
 			if i+interval > len (inurls):
 				
 				print ("Now scrapings: ", i, len (inurls))
-				abortable_func = partial (abortable_worker, linkscraper, timeout=120)
+				abortable_func = partial (abortable_worker, linkscraper, timeout=10000)
 				#print (abortable_func)
 				pool.apply_async(abortable_func, args=(i, len (inurls), inurls))
 			else:
-				abortable_func = partial(abortable_worker, linkscraper, timeout=120)
+				abortable_func = partial(abortable_worker, linkscraper, timeout=10000)
 				pool.apply_async(abortable_func, args=(i, i+interval, inurls))#,callback=collectMyResult)
 				print ("Now scraping: ", i, i+interval)
 		pool.close()
@@ -296,7 +300,7 @@ def get_inurls (wickedlinks, wickedbig):
 	cur = con.cursor ()
 	cur.execute ("Select url from cases")
 	urls = [re.sub ("\n","", url[0]) for url in cur.fetchall()]
-	print (urls)
+	#print (urls)
 
 	inurls = list(set(urls) - set(matchlist))
 
@@ -311,9 +315,9 @@ def get_inurls (wickedlinks, wickedbig):
 
 ####	---FILES---datadir = "dropbox/bigdata/Wicked"
 
-workdir = "mystuff"
+workdir = "Responsiveness/protests/workdir" #CHANGED 
 #datadir = "dropbox/bigdata/Wicked"
-datadir = "data"
+datadir = "Responsiveness/protests/wickedonna" #CHANGED
 
 #target_db = "WickedonnaFULLNew_Unique.db" 33608 ´9223
 target_db = "Wickedonna_html.db"
@@ -335,6 +339,7 @@ if __name__ == "__main__":
 	try:
 		new_database (target_db)
 	except Exception:
+		#print("error: db creation failed")
 		pass
 
 	citylist = set (get_place (cities))
