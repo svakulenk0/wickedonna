@@ -7,21 +7,24 @@ import os
 import sqlite3
 
 import scrapy
-from scrapy.http import HtmlResponse
+#from scrapy.http import HtmlResponse
 from scrapy.crawler import CrawlerProcess
 from twisted.internet import reactor
 from scrapy.crawler import CrawlerRunner
-from scrapy.utils.log import configure_logging
+#from scrapy.utils.log import configure_logging
+from scrapy.utils.response import open_in_browser
 
 from bs4 import BeautifulSoup
 
 
 ####################################################################
-
+entryCount = 0
 workdir = "Responsiveness/protests/workdir" #SPECIFY 
 datadir = "Responsiveness/protests/wickedonna" #SPECIFY
 target_db = "Wickedonna_html.db"
 target_db = os.path.join (os.environ ['HOME'], datadir, target_db)
+tweet_db = "Tweets.db"
+tweet_db = os.path.join (os.environ ['HOME'], datadir, tweet_db)
 
 wicked_big = "Wickedonna.db" #%str (date.today())
 wicked_big = os.path.join (os.environ ['HOME'], datadir, wicked_big)
@@ -34,11 +37,11 @@ counties = os.path.join (os.environ ['HOME'], workdir, counties)
 
 ####################################################################
 
-def new_database (name):
+def new_big_database (name):
 	conn = sqlite3.connect (name)
 	#print("connected %s"%name)
 	cur = conn.cursor()
-	cur.execute("""CREATE TABLE CASES
+	cur.execute("""CREATE TABLE Cases
     	   (ID integer primary key autoincrement,
     	   	url    			TEXT    NOT NULL,
      	  	date    		TEXT    NOT NULL,
@@ -50,8 +53,43 @@ def new_database (name):
        		keyword2		Text	NOT NULL,
        		people			Text	NOT NULL,
        		UNIQUE (url));""")
-	print("after execute")
 	conn.close
+
+
+def new_tweet_database (name):
+	conn = sqlite3.connect (name)
+	#print("connected %s"%name)
+	cur = conn.cursor()
+	cur.execute("""CREATE TABLE Tweets
+    	   (ID integer primary key autoincrement,
+    	   	url    			TEXT    NOT NULL,
+       		userId			integer NOT NULL,
+       		nickname		TEXT	NOT NULL,
+            tweet			TEXT    NOT NULL,
+            images			TEXT)""")
+	conn.close
+	print("table created")
+	
+
+def get_inurls (wickedlinks, wickedbig):
+	matchlist = []
+	conn = sqlite3.connect (wickedbig)
+	cur = conn.cursor()
+	cur.execute ("select url from cases")
+	content = cur.fetchall()
+	for cont in content:
+		cont = re.sub ("\n", "", cont [0])
+		matchlist.append(cont)
+	inurls = []
+	con = sqlite3.connect (wickedlinks)
+	cur = con.cursor ()
+	cur.execute ("Select url from cases")
+	urls = [re.sub ("\n","", url[0]) for url in cur.fetchall()]
+	inurls = list(set(urls) - set(matchlist))
+
+	#print ("we still have", len (inurls), "elements to scrape")	
+	return inurls
+
 
 
 def finddate (row):
@@ -85,20 +123,21 @@ def get_place (infile):
 				print (entry)
 		return keywdlist				
 
-def extract_content (soup,url):
+def extract_content (soup, url):
 	title = headline = content = date = keyword1 = keyword2 = city_w = county_w = "none"
 	title = soup.find ('title')
 	headline = re.sub('<[^<]+?>', '', str (title))	
 	
-	#TODO: content	
-	
 	#print ("headline", headline)
 	#content = soup.find ('div', {'class': 'article-content entry-content'})
+	
 	content = soup.find ('div', {'class': 'article-content entry-content'})
 	if content == None:
 		content = soup.find ('div', {'class': 'content'})
 	
 	content = re.sub('<[^<]+?>', '', str (content))
+	
+	#print("CONTENT %s\n"%content)
 	try:
 		date = finddate (str (headline))
 	except Exception as e:
@@ -181,71 +220,236 @@ def extract_people (content):
 
 class Wicked_Spider(scrapy.Spider):
 	name = "wicked_spider"
-
+	debug_mode = False
+	entryCount = 0
+	
 	def start_requests (self):
 		urls = inurls
 		#for i in range (0, 5):
 		for url in urls:
-			yield scrapy.Request(url=url, callback=self.parse)
+			yield scrapy.Request(url=url, callback=self.parse_details)
 
-	def parse (self, response):
+	def parse_details (self, response):
 		url = response.url		
-		#print("IN PARSE NOW")
-		conn = sqlite3.connect (target_db)
+		##conn = sqlite3.connect (target_db)
 		pageSource = response.body
 		soup = BeautifulSoup(pageSource, "lxml")
+		
 		try:
-			content = extract_content (soup, url)
+			content = extract_content (soup, url) 
 		except Exception as e:
-			print (e)
+			print ("EXCEPTION extracting content: ", e)	
 			
+		#print(content[5])
+		#print(soup.prettify())
+		'''
 		try:
-			#TODO: insert or update? 
 			conn.execute("INSERT INTO Cases (url, date, city, county, headline, text, keyword1, \
 				keyword2, people) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", \
 				(content[0], content [1], content [2], content [3], content [4], soup.prettify(),\
-				content [6], content [7], content [8]));
+				content [6], content [7], content [8]))
 			conn.commit()
 		except Exception as e:
-			print (e)
+			print ("EXCEPTION: ", e)
+			#TODO: WHY content[5] instead of soup.prettify()??
 			if "Service" not in content [4] and "Hotspot" not in content[4] and content[5] is not None and "None" not in content [5]:
 				conn.execute ("UPDATE Cases SET date = ?, city = ?, county = ?, headline = ?, text = ?, keyword1 = ?, keyword2 = ?, people = ? WHERE url == ?;",(content[1], content[2], content[3], content[4], content[5], content[6], content[7], content[8], url))
+				conn.commit()
 			else:
-				print (content [0], "no update because of", e)
+				print ("NO UPDATE for ", content [0], " because of ", e)
 				pass		
-			conn.commit()
-		print ("database committed", content [0])
+		#print("weibo" in soup)
+		#print("weibo" in soup.prettify())
+		'''
+		if ("weibo" in str(pageSource)):
+			self.parse_tweets(response, url)
+	
+	#TODO: null constraint
+	#TODO: TWEET NONE 	
+	def parse_tweets (self, response, url):
+		body = response.body
+		url = url
+		print("URL ", url)
+		userId = int(url.split("/")[4])
+		nickname = " "
+		tweet = " "
+		images = " "
+		print ("UserID : ", userId);
+			
+		#soup = BeautifulSoup(body, "lxml")
+		#content = soup.find('div', {'class': 'content'})
+		content = response.xpath("//div[@class='content']")
+		if len(content) > 1:
+			for i in range (0, len(content)):
+				if not content[i].xpath(".//script"):
+					content = content[i]
+					break
+		if len(content) != 1:
+			print("ERROR content len = ", len(content))
+		
+		if content.xpath("//div[@class='WB_info']"):
+			#first nickname
+			nickname = content.xpath("//div[@class='WB_info']/a[@class='WB_name S_func1']/text()").extract_first()
+			print ("UNAME : ", nickname)
+			if nickname is None:
+				print("NICKNAME NONE ")
+				nickname = content.xpath("//div[@class='WB_info']/a/text()").extract_first()
+				if nickname is None:
+					print("NICKNAME NONE AGAIN - OPEN URL")
+					open_in_browser(response)
+					nickname = "unknown"
+				
+			
+			tweets = content.xpath("//div[@class='WB_text']")
+			tweet = " "
+			name = 0
+			#print(len(tweets))
+			for i in range (0, len(tweets)):		
+				#print("tweet")
+				parts = tweets[i].xpath("./text()").extract()
+				for p in parts: 
+					tweet = tweet + p
+				if tweets[i].xpath("./span"):
+					parts = tweets[i].xpath("./span/text()").extract()
+					for p in parts: 
+						tweet = tweet + p
+				if tweets[i].xpath("./img"):
+					img_list = tweets[i].xpath("./img[@src]").extract()
+					print(img_list)
+					tmp_imgs = ",".join(img_list)
+					images = images + tmp_imgs
+				
+				#print("NEXT TWEET: \n" ,i, " ", tweets[i])
+				
+				#username before next tweet
+				if tweets[i].xpath("./div[@class='WB_info']/a[@class='WB_name S_func1']"):
+					name = 1
+					if tweet != " ":	
+						self.tweet2db (url, userId, nickname, tweet, images)
+						time.sleep(4)
+					nickname = tweets[i].xpath("./div[@class='WB_info']/a[@class='WB_name S_func1']/text()").extract_first()
+					if nickname is None:
+						print("NICKNAME NONE (SECOND WB_INFO)- OPEN URL")
+						open_in_browser(response)
+						nickname = "unknown"
+					tweet = " "
+				#same tweet
+				#elif tweets[i].xpath(".//div[@class='WB_text']"):
+				'''else:
+					parts = tweets[i].xpath("./text()").extract()
+					for p in parts: 
+						tweet = tweet + p
+					if tweets[i].xpath("./span"):
+						parts = tweets[i].xpath("./span/text()").extract()
+						for p in parts: 
+							tweet = tweet + p
+					
+					if tweets[i].xpath("./img"):
+						images = tweets[i].xpath("./img[@src]").extract()
+						print("IMAGES: ", len(images))
+						#print(images)	
+				'''
+			if tweet != " ":
+				self.tweet2db (url, userId, nickname, tweet, images)
+			
+					
+		
+		else: 
+			#other site structure (mixed sources)
+			
+			#open_in_browser(response)
+			nickname = " " 
+			tweet = " "
+			ps = content.xpath(".//p") #[@class='S_txt1']")
+			isWeibo = False
+			for p in ps:
+				#print(p)
+				href = p.xpath("./a[@href]").extract_first()
+				if href is not None and "weibo" in href:
+					isWeibo = True
+					if p.xpath("./a"):
+						if nickname == " ":
+							nickname = p.xpath("./a/text()").extract_first()
+							if nickname is None:
+								print("NICKAME NONE; SECOND OPTION")
+								open_in_browser(response)
+							print("NICKNAME ", nickname)
+						else:
+							if tweet == " ":
+								#open_in_browser(response)
+								print("POSSIBLY WEIRD: ")
+								tweet = tweet + p.xpath("./a//text()").extract_first()
+								print(tweet)
+							else: 
+								self.tweet2db (url, userId, nickname, tweet, images)
+								time.sleep(5)
+								tweet = " "
+								images = " "
+								#next tweet
+								nickname = p.xpath("./a//text()").extract_first()
+				else:
+					if isWeibo == True:
+						parts = p.xpath(".//text()").extract()
+						for part in parts:
+							tweet = tweet + part
+					#if p.xpath("./span"):
+					#parts = p.xpath("./span/text()").extract()
+					#for part in parts: 
+					#tweet = tweet + part
+					#print("TWEET ", tweet)
+					#time.sleep(4)
+						if p.xpath(".//img"):
+							#print("IMAGES IN OTHER STRUCTURE")
+							img_list = p.xpath(".//img[@src]").extract()
+							tmp_imgs = ",".join(img_list)
+							images = images + tmp_imgs
+						print("#############")		
 
 
-def get_inurls (wickedlinks, wickedbig):
-	matchlist = []
-	conn = sqlite3.connect (wickedbig)
-	cur = conn.cursor()
-	cur.execute ("select url from cases")
-	content = cur.fetchall()
-	for cont in content:
-		cont = re.sub ("\n", "", cont [0])
-		matchlist.append(cont)
-	inurls = []
-	con = sqlite3.connect (wickedlinks)
-	cur = con.cursor ()
-	cur.execute ("Select url from cases")
-	urls = [re.sub ("\n","", url[0]) for url in cur.fetchall()]
-	#print (urls)
 
-	inurls = list(set(urls) - set(matchlist))
-
-	#print ("we still have", len (inurls), "elements to scrape")	
-	return inurls
-
+	def tweet2db (self, url, userId, nickname, tweet, images):
+		name = nickname
+		if (name is None and tweet is None):
+			print("ALL NONE - PASS")
+			return
+		if (name == " " and tweet == " "):
+			print("ALL EMPTY - PASS")
+			return
+		if name is None and tweet == " ":
+			if tweet == " ":
+				print("ALL NONE OR EMPTY; PASS")
+				return
+			name = "none"
+			print ("NAME NONE; BUT TWEET: ", tweet)
+		if name is not None:
+			name = name.strip()
+		tweet = tweet
+		imgs = images
+		self.entryCount += 1
+		print("ENTRYCOUNT ", self.entryCount)
+		if imgs  == " ":
+			imgs = None
+		else:
+			imgs = imgs.strip()
+		conn = sqlite3.connect (tweet_db)
+		conn.execute("INSERT INTO Tweets (url, userId, nickname, tweet, images) VALUES (?, ?, ?, ?, ?)", (url, userId, name, tweet, images))
+		conn.commit()
+		conn.close()
+		print("ENTRYCOUNT AFTER INSERT ", self.entryCount)
+		print("wrote to db ", name, tweet, images)
 		
 
 if __name__ == "__main__":
 	
 	try:
-		new_database (target_db)
+		new_big_database (target_db)
 	except Exception:
 		#print("error: db creation failed")
+		pass
+		
+	try:
+		new_tweet_database (tweet_db)
+	except Exception:
 		pass
 
 	citylist = set (get_place (cities))
@@ -258,6 +462,8 @@ if __name__ == "__main__":
 })
 
 	process.crawl(Wicked_Spider)
-	process.start() # the script will block here until the crawling is finished
-
+	try:
+		process.start() # the script will block here until the crawling is finished
+	except Exception:
+		print("EXC ", process.entryCount)
 
