@@ -16,7 +16,6 @@ from scrapy.utils.response import open_in_browser
 
 from bs4 import BeautifulSoup
 
-
 ####################################################################
 entryCount = 0
 workdir = "Responsiveness/protests/workdir" #SPECIFY 
@@ -26,7 +25,7 @@ target_db = os.path.join (os.environ ['HOME'], datadir, target_db)
 tweet_db = "Tweets.db"
 tweet_db = os.path.join (os.environ ['HOME'], datadir, tweet_db)
 
-wicked_big = "Wickedonna.db" #%str (date.today())
+wicked_big = "Wickedonna.db"
 wicked_big = os.path.join (os.environ ['HOME'], datadir, wicked_big)
 
 cities = "Cities.csv"
@@ -68,28 +67,29 @@ def new_tweet_database (name):
             tweet			TEXT    NOT NULL,
             images			TEXT)""")
 	conn.close
-	print("table created")
 	
-
-def get_inurls (wickedlinks, wickedbig):
-	matchlist = []
-	conn = sqlite3.connect (wickedbig)
-	cur = conn.cursor()
+def get_inurls (wickedlinks, scraped):
+	con1 = sqlite3.connect (wickedlinks)
+	cur = con1.cursor()
 	cur.execute ("select url from cases")
-	content = cur.fetchall()
-	for cont in content:
-		cont = re.sub ("\n", "", cont [0])
-		matchlist.append(cont)
+	allUrls = cur.fetchall()
+	con1.close()
+	con2 = sqlite3.connect (scraped)
+	cur = con2.cursor()
+	cur.execute ("select url from cases")
+	scrapedUrls = cur.fetchall()
+	con2.close()
+	entryCount = len(scrapedUrls)
 	inurls = []
-	con = sqlite3.connect (wickedlinks)
-	cur = con.cursor ()
-	cur.execute ("Select url from cases")
-	urls = [re.sub ("\n","", url[0]) for url in cur.fetchall()]
-	inurls = list(set(urls) - set(matchlist))
-
-	#print ("we still have", len (inurls), "elements to scrape")	
+	tupel = list(set(allUrls) - set(scrapedUrls))
+	for url in tupel:
+		#print(url)
+		url = str(url).strip("('',)")
+		url = url.strip("\n")
+		#print(url)
+		inurls.append(url)	
+	print ("we still have", len (inurls), "elements to scrape")	
 	return inurls
-
 
 
 def finddate (row):
@@ -217,21 +217,19 @@ def extract_people (content):
 	return term
 
 
-
 class Wicked_Spider(scrapy.Spider):
 	name = "wicked_spider"
 	debug_mode = False
-	entryCount = 0
+	entryCount = entryCount
 	
 	def start_requests (self):
 		urls = inurls
-		#for i in range (0, 5):
 		for url in urls:
+			#url = str(url)
 			yield scrapy.Request(url=url, callback=self.parse_details)
 
 	def parse_details (self, response):
 		url = response.url		
-		##conn = sqlite3.connect (target_db)
 		pageSource = response.body
 		soup = BeautifulSoup(pageSource, "lxml")
 		
@@ -239,45 +237,43 @@ class Wicked_Spider(scrapy.Spider):
 			content = extract_content (soup, url) 
 		except Exception as e:
 			print ("EXCEPTION extracting content: ", e)	
-			
-		#print(content[5])
-		#print(soup.prettify())
-		'''
+
+		
 		try:
+			conn = sqlite3.connect (target_db)
 			conn.execute("INSERT INTO Cases (url, date, city, county, headline, text, keyword1, \
 				keyword2, people) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", \
 				(content[0], content [1], content [2], content [3], content [4], soup.prettify(),\
 				content [6], content [7], content [8]))
 			conn.commit()
+			conn.close()
 		except Exception as e:
 			print ("EXCEPTION: ", e)
-			#TODO: WHY content[5] instead of soup.prettify()??
 			if "Service" not in content [4] and "Hotspot" not in content[4] and content[5] is not None and "None" not in content [5]:
 				conn.execute ("UPDATE Cases SET date = ?, city = ?, county = ?, headline = ?, text = ?, keyword1 = ?, keyword2 = ?, people = ? WHERE url == ?;",(content[1], content[2], content[3], content[4], content[5], content[6], content[7], content[8], url))
 				conn.commit()
 			else:
-				print ("NO UPDATE for ", content [0], " because of ", e)
+				#print ("NO UPDATE for ", content [0], " because of ", e)
 				pass		
-		#print("weibo" in soup)
-		#print("weibo" in soup.prettify())
-		'''
+		
 		if ("weibo" in str(pageSource)):
 			self.parse_tweets(response, url)
-	
-	#TODO: null constraint
-	#TODO: TWEET NONE 	
+
 	def parse_tweets (self, response, url):
 		body = response.body
 		url = url
 		print("URL ", url)
-		userId = int(url.split("/")[4])
+		userId = 0
+		if "post" not in url:
+			
+		else:
+			userId = int(url.split("/")[4])
 		nickname = " "
+			tmpuid = url.split("/")[-1]
+			userId = int(tmpuid.split("_")[0])
 		tweet = " "
 		images = " "
-		print ("UserID : ", userId);
-			
-		#soup = BeautifulSoup(body, "lxml")
-		#content = soup.find('div', {'class': 'content'})
+
 		content = response.xpath("//div[@class='content']")
 		if len(content) > 1:
 			for i in range (0, len(content)):
@@ -288,24 +284,23 @@ class Wicked_Spider(scrapy.Spider):
 			print("ERROR content len = ", len(content))
 		
 		if content.xpath("//div[@class='WB_info']"):
-			#first nickname
+			#first nickname on page
 			nickname = content.xpath("//div[@class='WB_info']/a[@class='WB_name S_func1']/text()").extract_first()
-			print ("UNAME : ", nickname)
 			if nickname is None:
-				print("NICKNAME NONE ")
 				nickname = content.xpath("//div[@class='WB_info']/a/text()").extract_first()
-				if nickname is None:
-					print("NICKNAME NONE AGAIN - OPEN URL")
-					open_in_browser(response)
-					nickname = "unknown"
+			if nickname is None:
+				nickname = content.xpath("//div[@class='WB_text']/a/text()").extract_first()		
+			if nickname is None:
+				nickname = content.xpath("//div[@class='WB_info']/.//div[@class='userName']/.//text()").extract_first()
+			if nickname is None:
+				print("NICKNAME NONE AGAIN - OPEN URL")
+				open_in_browser(response)
+				nickname = "unknown"
 				
-			
+			#all tweets on page
 			tweets = content.xpath("//div[@class='WB_text']")
 			tweet = " "
-			name = 0
-			#print(len(tweets))
 			for i in range (0, len(tweets)):		
-				#print("tweet")
 				parts = tweets[i].xpath("./text()").extract()
 				for p in parts: 
 					tweet = tweet + p
@@ -313,98 +308,95 @@ class Wicked_Spider(scrapy.Spider):
 					parts = tweets[i].xpath("./span/text()").extract()
 					for p in parts: 
 						tweet = tweet + p
+				if tweets[i].xpath("./div[@class='msgCnt']"):
+					parts = tweets[i].xpath("./div[@class='msgCnt']/text()").extract()
+					for p in parts: 
+						tweet = tweet + p
 				if tweets[i].xpath("./img"):
 					img_list = tweets[i].xpath("./img[@src]").extract()
-					print(img_list)
+					tmp_imgs = ",".join(img_list)
+					images = images + tmp_imgs
+				if tweets[i].xpath("./div[@class='msgCnt']/img"):
+					img_list = tweets[i].xpath("./div[@class='msgCnt']/img[@src]").extract()
 					tmp_imgs = ",".join(img_list)
 					images = images + tmp_imgs
 				
-				#print("NEXT TWEET: \n" ,i, " ", tweets[i])
-				
 				#username before next tweet
 				if tweets[i].xpath("./div[@class='WB_info']/a[@class='WB_name S_func1']"):
-					name = 1
-					if tweet != " ":	
+					if tweet != " ":
+						#before parsing next tweet, write current tweet to db	
 						self.tweet2db (url, userId, nickname, tweet, images)
-						time.sleep(4)
+						tweet = " "
+						images = " "
+						time.sleep(2)
+						
+					#next nickname	
 					nickname = tweets[i].xpath("./div[@class='WB_info']/a[@class='WB_name S_func1']/text()").extract_first()
 					if nickname is None:
-						print("NICKNAME NONE (SECOND WB_INFO)- OPEN URL")
-						open_in_browser(response)
-						nickname = "unknown"
+						nickname = ("./div[@class='username']/.//text()").extract_first()
+						if nickname is None:
+							print("NICKNAME NONE (SECOND WB_INFO)- OPEN URL")
+							open_in_browser(response)
+							nickname = "unknown"
 					tweet = " "
-				#same tweet
-				#elif tweets[i].xpath(".//div[@class='WB_text']"):
-				'''else:
-					parts = tweets[i].xpath("./text()").extract()
-					for p in parts: 
-						tweet = tweet + p
-					if tweets[i].xpath("./span"):
-						parts = tweets[i].xpath("./span/text()").extract()
-						for p in parts: 
-							tweet = tweet + p
-					
-					if tweets[i].xpath("./img"):
-						images = tweets[i].xpath("./img[@src]").extract()
-						print("IMAGES: ", len(images))
-						#print(images)	
-				'''
+			#finally, write last tweet on page to db
 			if tweet != " ":
 				self.tweet2db (url, userId, nickname, tweet, images)
+				tweet = " "
+				images = " "
 			
 					
 		
 		else: 
-			#other site structure (mixed sources)
-			
-			#open_in_browser(response)
+			#p tags
 			nickname = " " 
 			tweet = " "
 			ps = content.xpath(".//p") #[@class='S_txt1']")
-			isWeibo = False
 			for p in ps:
-				#print(p)
+				isWeibo = False
 				href = p.xpath("./a[@href]").extract_first()
 				if href is not None and "weibo" in href:
 					isWeibo = True
-					if p.xpath("./a"):
-						if nickname == " ":
-							nickname = p.xpath("./a/text()").extract_first()
-							if nickname is None:
-								print("NICKAME NONE; SECOND OPTION")
-								open_in_browser(response)
-							print("NICKNAME ", nickname)
+					if nickname == " ":
+						nickname = p.xpath("./a/.//text()").extract_first()
+						if nickname is None:
+							print("NICKAME NONE; SECOND OPTION")
+							open_in_browser(response)
+							nickname = "unknown"
+					else:
+						if tweet == " ":
+							#open_in_browser(response)
+							print("POSSIBLY WEIRD: ")
+							tweet = tweet + p.xpath("./a/.//text()").extract_first()
+							print(tweet)
+					
 						else:
-							if tweet == " ":
-								#open_in_browser(response)
-								print("POSSIBLY WEIRD: ")
-								tweet = tweet + p.xpath("./a//text()").extract_first()
-								print(tweet)
-							else: 
-								self.tweet2db (url, userId, nickname, tweet, images)
-								time.sleep(5)
-								tweet = " "
-								images = " "
-								#next tweet
-								nickname = p.xpath("./a//text()").extract_first()
+							#does entire tweet consist of @tags? if yes, then add another one
+							t_check = tweet.split(" ")
+							for t in t_check:
+								
+								if len(t) > 0 and not t[0] == "@":
+									print("NO @")
+									self.tweet2db (url, userId, nickname, tweet, images)
+									time.sleep(2)
+									tweet = " "
+									images = " "
+									#next tweet
+									nickname = p.xpath("./a/.//text()").extract_first()	
+							#add tag to same tweet				
+							if tweet != " ":
+								tweet = tweet + p.xpath("./a/.//text()").extract_first()
+								
 				else:
 					if isWeibo == True:
 						parts = p.xpath(".//text()").extract()
 						for part in parts:
 							tweet = tweet + part
-					#if p.xpath("./span"):
-					#parts = p.xpath("./span/text()").extract()
-					#for part in parts: 
-					#tweet = tweet + part
-					#print("TWEET ", tweet)
-					#time.sleep(4)
 						if p.xpath(".//img"):
-							#print("IMAGES IN OTHER STRUCTURE")
 							img_list = p.xpath(".//img[@src]").extract()
 							tmp_imgs = ",".join(img_list)
 							images = images + tmp_imgs
-						print("#############")		
-
+		print("#############")		
 
 
 	def tweet2db (self, url, userId, nickname, tweet, images):
@@ -419,14 +411,11 @@ class Wicked_Spider(scrapy.Spider):
 			if tweet == " ":
 				print("ALL NONE OR EMPTY; PASS")
 				return
-			name = "none"
-			print ("NAME NONE; BUT TWEET: ", tweet)
 		if name is not None:
 			name = name.strip()
 		tweet = tweet
 		imgs = images
 		self.entryCount += 1
-		print("ENTRYCOUNT ", self.entryCount)
 		if imgs  == " ":
 			imgs = None
 		else:
@@ -435,8 +424,7 @@ class Wicked_Spider(scrapy.Spider):
 		conn.execute("INSERT INTO Tweets (url, userId, nickname, tweet, images) VALUES (?, ?, ?, ?, ?)", (url, userId, name, tweet, images))
 		conn.commit()
 		conn.close()
-		print("ENTRYCOUNT AFTER INSERT ", self.entryCount)
-		print("wrote to db ", name, tweet, images)
+		print("WROTE TO DB ", self.entryCount, ": ", name, tweet, images)
 		
 
 if __name__ == "__main__":
@@ -444,7 +432,6 @@ if __name__ == "__main__":
 	try:
 		new_big_database (target_db)
 	except Exception:
-		#print("error: db creation failed")
 		pass
 		
 	try:
@@ -460,10 +447,7 @@ if __name__ == "__main__":
 	process = CrawlerProcess({
     'USER_AGENT': 'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)'
 })
-
-	process.crawl(Wicked_Spider)
-	try:
-		process.start() # the script will block here until the crawling is finished
-	except Exception:
-		print("EXC ", process.entryCount)
+	process.crawl(Wicked_Spider)	
+	process.start() # the script will block here until the crawling is finished
+	
 
